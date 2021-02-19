@@ -103,6 +103,12 @@
             app:layout_constraintStart_toEndOf="@+id/startMappingButton"
             app:layout_constraintTop_toTopOf="@+id/startMappingButton"/>
 
+        <Button
+            android:id="@+id/get"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="get all"/>
+
 
     </LinearLayout>
 
