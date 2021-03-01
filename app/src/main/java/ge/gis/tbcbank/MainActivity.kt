@@ -21,6 +21,8 @@ import com.aldebaran.qi.sdk.`object`.actuation.*
 import com.aldebaran.qi.sdk.`object`.geometry.TransformTime
 import com.aldebaran.qi.sdk.`object`.holder.AutonomousAbilitiesType
 import com.aldebaran.qi.sdk.`object`.holder.Holder
+import com.aldebaran.qi.sdk.`object`.streamablebuffer.StreamableBuffer
+import com.aldebaran.qi.sdk.builder.ExplorationMapBuilder
 import com.aldebaran.qi.sdk.builder.HolderBuilder
 import com.aldebaran.qi.sdk.builder.LocalizeAndMapBuilder
 import com.aldebaran.qi.sdk.design.activity.RobotActivity
@@ -46,7 +48,8 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
     private var nextLocation: String? = null
     var goToRandomRunning = false
     private var goToRandomFuture: Future<Void>? = null
-
+    private var streamableExplorationMap: StreamableBuffer? = null
+    private var toSaveExplorationMap: ExplorationMap? = null
 
     private var TAG = "DDDD"
     private lateinit var spinnerAdapter: ArrayAdapter<String>
@@ -111,6 +114,35 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
 
         goToRandom.setOnClickListener {
             goToRandomLocation(true)
+        }
+
+        loadMap.setOnClickListener {
+
+            if (getStreamableMap() == null) {
+                val mapData = saveFileHelper!!.readStreamableBufferFromFile(
+                    filesDirectoryPath,
+                   mapFileName
+                )
+
+
+                setStreamableMap(mapData!!)
+
+                Thread{
+
+
+                val readedExplorationMap: ExplorationMap = ExplorationMapBuilder.with(qiContext).withStreamableBuffer(streamableExplorationMap).build()
+
+                    mapToBitmap(readedExplorationMap)
+
+
+                }.start()
+
+
+
+
+
+            }
+
         }
 
         get.setOnClickListener {
@@ -272,6 +304,7 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
                     }
 
 
+
                     val attachedFrame =
                         mapFrame!!.async().makeAttachedFrame(t).value
 
@@ -313,7 +346,7 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
             thread {
 
                 goToLocation(nextLocation!!, OrientationPolicy.ALIGN_X)
-            }
+            }.start()
 
         } else {
             try {
@@ -406,7 +439,9 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
     override fun onRobotFocusRefused(reason: String?) {
 
     }
-
+    fun setStreamableMap(map: StreamableBuffer) {
+        streamableExplorationMap = map
+    }
     private fun mapSurroundings(qiContext: QiContext): Future<ExplorationMap> {
         // Create a Promise to set the operation state later.
         val promise = Promise<ExplorationMap>().apply {
@@ -427,6 +462,9 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
                     if (status == LocalizationStatus.LOCALIZED) {
                         // Retrieve the map.
                         val explorationMap = localizeAndMap.dumpMap()
+
+                        toSaveExplorationMap = explorationMap
+
                         // Set the Promise state in success, with the ExplorationMap.
                         if (!promise.future.isDone) {
                             promise.setValue(explorationMap)
@@ -458,11 +496,12 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
     private fun mapToBitmap(explorationMap: ExplorationMap) {
         explorationMapView.setExplorationMap(explorationMap.topGraphicalRepresentation)
     }
-
+    fun getStreamableMap(): StreamableBuffer? {
+        return streamableExplorationMap
+    }
 
     private fun startMappingStep(qiContext: QiContext) {
         Log.i(TAG.toString(), "startMappingStep Class")
-        startMappingButton.isEnabled = false
         // Map the surroundings and get the map.
         mapSurroundings(qiContext).thenConsume { future ->
             if (future.isSuccess) {
@@ -473,6 +512,15 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
                 // Convert the map to a bitmap.
                 mapToBitmap(explorationMap)
                 // Display the bitmap and enable "extend map" button.
+
+                setStreamableMap(toSaveExplorationMap!!.serializeAsStreamableBuffer())
+
+                val mapData: StreamableBuffer? = getStreamableMap()
+                saveFileHelper!!.writeStreamableBufferToFile(
+                    filesDirectoryPath,
+                    mapFileName,
+                    mapData!!
+                )
                 runOnUiThread {
                     if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
                         extendMapButton.isEnabled = true

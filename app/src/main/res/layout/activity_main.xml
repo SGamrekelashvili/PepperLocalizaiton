@@ -109,6 +109,12 @@
             android:layout_height="wrap_content"
             android:text="get all"/>
 
+        <Button
+            android:id="@+id/loadMap"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Load Map"/>
+
 
     </LinearLayout>
 

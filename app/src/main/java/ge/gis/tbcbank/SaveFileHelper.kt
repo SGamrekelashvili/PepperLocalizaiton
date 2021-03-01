@@ -2,19 +2,23 @@ package ge.gis.tbcbank
 
 import android.util.Log
 import com.aldebaran.qi.sdk.`object`.streamablebuffer.StreamableBuffer
-import com.aldebaran.qi.sdk.`object`.streamablebuffer.StreamableBufferFactory
+import com.aldebaran.qi.sdk.`object`.streamablebuffer.StreamableBufferFactory.fromFunction
+import com.aldebaran.qi.sdk.util.copyToStream
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import java.io.*
+import java.nio.ByteBuffer
 import java.util.*
-
 
 class SaveFileHelper {
 
 
     private val TAG = "MSI_SaveFileHelper"
 
-    fun getLocationsFromFile(filesDirectoryPath: String, LocationsFileName: String): MutableMap<String?, Vector2theta?>? {
+    fun getLocationsFromFile(
+        filesDirectoryPath: String,
+        LocationsFileName: String
+    ): MutableMap<String?, Vector2theta?>? {
         var vectors: MutableMap<String?, Vector2theta?>? = null
         var fis: FileInputStream? = null
         var ois: ObjectInputStream? = null
@@ -86,37 +90,70 @@ class SaveFileHelper {
     }
 
 
-//    fun writeStreamableBufferToFile(
-//        filesDirectoryPath: String?,
-//        fileName: String?,
-//        data: StreamableBuffer?
-//    ) {
-//        var fos: FileOutputStream? = null
-//        try {
-//            Log.d(TAG, "writeMapDataToFile: started")
-//            val fileDirectory = File(filesDirectoryPath, "")
-//            if (!fileDirectory.exists()) {
-//                fileDirectory.mkdirs()
-//            }
-//            val file = File(fileDirectory, fileName!!)
-//            fos = FileOutputStream(file)
-//            StreamableBufferFactory
-//        } catch (e: IOException) {
-//            Log.e("Exception", "File write failed: " + e.message, e)
-//        } finally {
-//            if (fos != null) {
-//                try {
-//                    fos.close()
-//                } catch (e: IOException) {
-//                    e.printStackTrace()
-//                }
-//            }
-//        }
-//        Log.d(TAG, "writeMapDataToFile:  Finished")
-//    }
-//
+    fun writeStreamableBufferToFile(
+        filesDirectoryPath: String?,
+        fileName: String?,
+        data: StreamableBuffer
+    ) {
+        var fos: FileOutputStream? = null
+        try {
+            Log.d(TAG, "writeMapDataToFile: started")
+            val fileDirectory = File(filesDirectoryPath, "")
+            if (!fileDirectory.exists()) {
+                fileDirectory.mkdirs()
+            }
+            val file = File(fileDirectory, fileName!!)
+            fos = FileOutputStream(file)
+            data.copyToStream(fos)
+        } catch (e: IOException) {
+            Log.e("Exception", "File write failed: " + e.message, e)
+        } finally {
+            if (fos != null) {
+                try {
+                    fos.close()
+                } catch (e: IOException) {
+                    e.printStackTrace()
+                }
+            }
+        }
+        Log.d(TAG, "writeMapDataToFile:  Finished")
+    }
 
 
+    fun readStreamableBufferFromFile(
+        filesDirectoryPath: String?,
+        fileName: String?
+    ): StreamableBuffer? {
+        var data: StreamableBuffer? = null
+        var f: File? = null
+        try {
+            f = File(filesDirectoryPath, fileName!!)
+            if (f.length() == 0L) return null
+            data = fromFile(f)
+            return data
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return null
+    }
 
+    private fun fromFile(file: File): StreamableBuffer? {
+        return fromFunction(file.length()) { offset: Long?, size: Long ->
+            try {
 
+                Log.d("tryyy", "fromFile: ")
+                RandomAccessFile(file, "r").use { randomAccessFile ->
+                    val byteArray = ByteArray(size.toInt())
+                    randomAccessFile.seek(offset!!)
+                    randomAccessFile.read(byteArray)
+                    return@fromFunction ByteBuffer.wrap(byteArray)
+                }
+            } catch (e: FileNotFoundException) {
+                Log.d("chatchhhh", "fromFile: ")
+
+                val byteArray = ByteArray(size.toInt())
+                return@fromFunction ByteBuffer.wrap(byteArray)
+            }
+        }
+    }
 }
