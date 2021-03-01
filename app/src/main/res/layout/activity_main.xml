@@ -27,10 +27,10 @@
         android:layout_height="match_parent"
         android:layout_weight="1">
         <Button
-            android:id="@+id/canelGoTo"
+            android:id="@+id/goToRandom"
             android:layout_width="fill_parent"
             android:layout_height="wrap_content"
-            android:text="goToCancel">
+            android:text="Go To Random">
 
         </Button>
         <Button

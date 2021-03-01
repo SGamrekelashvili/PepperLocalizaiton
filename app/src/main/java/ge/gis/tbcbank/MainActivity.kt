@@ -7,22 +7,22 @@ import android.util.Log
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
+import com.aldebaran.qi.Consumer
 import com.aldebaran.qi.Future
 import com.aldebaran.qi.Promise
 import com.aldebaran.qi.sdk.QiContext
 import com.aldebaran.qi.sdk.QiSDK
 import com.aldebaran.qi.sdk.RobotLifecycleCallbacks
 import com.aldebaran.qi.sdk.`object`.actuation.*
-import com.aldebaran.qi.sdk.`object`.geometry.Transform
 import com.aldebaran.qi.sdk.`object`.geometry.TransformTime
 import com.aldebaran.qi.sdk.`object`.holder.AutonomousAbilitiesType
 import com.aldebaran.qi.sdk.`object`.holder.Holder
 import com.aldebaran.qi.sdk.builder.HolderBuilder
 import com.aldebaran.qi.sdk.builder.LocalizeAndMapBuilder
-import com.aldebaran.qi.sdk.builder.TransformBuilder
 import com.aldebaran.qi.sdk.design.activity.RobotActivity
 import com.aldebaran.qi.sdk.util.FutureUtils
 import com.softbankrobotics.dx.pepperextras.actuation.StubbornGoTo
@@ -39,9 +39,13 @@ import java.util.*
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.collections.ArrayList
+import kotlin.concurrent.thread
 
 
 class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
+    private var nextLocation: String? = null
+    var goToRandomRunning = false
+    private var goToRandomFuture: Future<Void>? = null
 
 
     private var TAG = "DDDD"
@@ -104,8 +108,9 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
             }
         }
 
-        canelGoTo.setOnClickListener{
 
+        goToRandom.setOnClickListener {
+            goToRandomLocation(true)
         }
 
         get.setOnClickListener {
@@ -119,7 +124,7 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
                 goto_button.isEnabled = false
                 save_button.isEnabled = false
                 val thread = Thread {
-                    goToLocation(it)
+                    goToLocation(it, OrientationPolicy.ALIGN_X)
                 }
                 thread.start()
             }
@@ -147,12 +152,11 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
         spinner.adapter = spinnerAdapter
 
 
-                loadLocations()
+        loadLocations()
 
 
 
         sTopLocalization.setOnClickListener {
-
 
 
             publishExplorationMapFuture?.cancel(true)
@@ -193,7 +197,7 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
             }
     }
 
-    fun saveLocation(location: String?){
+    fun saveLocation(location: String?) {
         // Get the robot frame asynchronously.
         Log.d(TAG, "saveLocation: Start saving this location")
 
@@ -231,7 +235,11 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
             // add to backup list
             locationsToBackup[key] = vector
         }
-        SaveFileHelper().saveLocationsToFile(filesDirectoryPath, locationsFileName, locationsToBackup)
+        SaveFileHelper().saveLocationsToFile(
+            filesDirectoryPath,
+            locationsFileName,
+            locationsToBackup
+        )
 
     }
 
@@ -254,7 +262,7 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
 
                 Log.i("yvelaa", vectors.toString())
 
-                vectors!!.forEach{(key1, value1) ->
+                vectors!!.forEach { (key1, value1) ->
 
                     val t = value1!!.createTransform()
                     Log.d(TAG, "loadLocations: $key1")
@@ -274,6 +282,12 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
 
                 load_location_success.set(true)
 
+
+                runOnUiThread {
+
+                    Toast.makeText(this, awd.toString(), Toast.LENGTH_LONG).show()
+                }
+
                 Log.d(TAG, "loadLocations: Done")
                 Log.d(TAG, awd.toString())
                 if (load_location_success.get()) return@futureOf Future.of(
@@ -286,22 +300,65 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
     }
 
 
-    private fun goToLocation(location: String) {
+    fun goToRandomLocation(setGoToRandom: Boolean) {
+        goToRandomRunning = setGoToRandom
+        if (goToRandomRunning) {
+            goToRandomFuture = FutureUtils.wait(15, TimeUnit.SECONDS)
+                .andThenConsume { aUselessFuture: Void? ->
+                    goToRandomLocation(
+                        goToRandomRunning
+                    )
+                }
+            nextLocation = pickRandomLocation()
+            thread {
+
+                goToLocation(nextLocation!!, OrientationPolicy.ALIGN_X)
+            }
+
+        } else {
+            try {
+                goToRandomFuture!!.thenConsume(
+                    Consumer<Future<Void?>> { voidFuture: Future<Void?>? ->
+                        Log.d(
+                            TAG,
+                            "goToRandomFuture: cancelled"
+                        )
+                    }
+                )
+                goToRandomFuture!!.cancel(true)
+            } catch (e: Exception) {
+                Log.d(TAG, "goToRandomLocation: error: $e")
+            }
+        }
+    }
+
+
+    private fun pickRandomLocation(): String {
+        val keysAsArray: MutableList<String> = java.util.ArrayList(awd.keys)
+        val r = Random()
+        val location = keysAsArray[r.nextInt(keysAsArray.size)]
+        return if (location != nextLocation) {
+            location
+        } else pickRandomLocation()
+    }
+
+    private fun goToLocation(location: String, orientationPolicy: OrientationPolicy) {
+
+        Log.d("awdawdawd", location)
+
         val freeFrame: AttachedFrame? = awd[location]
-
-
         val frameFuture: Frame = freeFrame!!.frame()
         val appscope = SingleThread.newCoroutineScope()
         val future: Future<Boolean> = appscope.asyncFuture {
             goto = StubbornGoToBuilder.with(qiContext!!)
-                .withFinalOrientationPolicy(OrientationPolicy.FREE_ORIENTATION)
+                .withFinalOrientationPolicy(orientationPolicy)
                 .withMaxRetry(10)
                 .withMaxSpeed(0.5f)
                 .withMaxDistanceFromTargetFrame(0.3)
                 .withWalkingAnimationEnabled(true)
                 .withFrame(frameFuture).build()
             goto!!.async().run().await()
-            }
+        }
         runBlocking {
             delay(5000)
             future.requestCancellation()
@@ -311,7 +368,6 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
         }
         waitForInstructions()
     }
-
 
 
     fun waitForInstructions() {
@@ -382,13 +438,13 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
                 localizeAndMap.async().run()
 
                     .thenConsume {
-                    // Remove the OnStatusChangedListener.
-                    localizeAndMap.removeAllOnStatusChangedListeners()
-                    // In case of error, forward it to the Promise.
-                    if (it.hasError() && !promise.future.isDone) {
-                        promise.setError(it.errorMessage)
+                        // Remove the OnStatusChangedListener.
+                        localizeAndMap.removeAllOnStatusChangedListeners()
+                        // In case of error, forward it to the Promise.
+                        if (it.hasError() && !promise.future.isDone) {
+                            promise.setError(it.errorMessage)
+                        }
                     }
-                }
             }
 
         // Return the Future associated to the Promise.
@@ -398,18 +454,19 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
             return@thenCompose it
         }
     }
+
     private fun mapToBitmap(explorationMap: ExplorationMap) {
         explorationMapView.setExplorationMap(explorationMap.topGraphicalRepresentation)
     }
 
 
     private fun startMappingStep(qiContext: QiContext) {
-        Log.i(TAG.toString(),"startMappingStep Class")
+        Log.i(TAG.toString(), "startMappingStep Class")
         startMappingButton.isEnabled = false
         // Map the surroundings and get the map.
         mapSurroundings(qiContext).thenConsume { future ->
             if (future.isSuccess) {
-                Log.i(TAG,"FUTURE Success")
+                Log.i(TAG, "FUTURE Success")
                 val explorationMap = future.get()
                 // Store the initial map.
                 this.initialExplorationMap = explorationMap
@@ -432,19 +489,21 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
         }
     }
 
-    private fun publishExplorationMap(localizeAndMap: LocalizeAndMap, updatedMapCallback: (ExplorationMap) -> Unit): Future<Void> {
-        Log.i(TAG.toString(),"Reecursively Function")
-            return localizeAndMap.async().dumpMap().andThenCompose {
-//                StreamableBuffer mapDATA = it.serializeAsStreamBuffer()
-                Log.i(TAG,"$it Function")
-                updatedMapCallback(it)
-                FutureUtils.wait(1, TimeUnit.SECONDS)
-            }.andThenCompose {
-                publishExplorationMap(localizeAndMap, updatedMapCallback)
-            }
+    private fun publishExplorationMap(
+        localizeAndMap: LocalizeAndMap,
+        updatedMapCallback: (ExplorationMap) -> Unit
+    ): Future<Void> {
+        return localizeAndMap.async().dumpMap().andThenCompose {
+            Log.i(TAG, "$it Function")
+            updatedMapCallback(it)
+            FutureUtils.wait(1, TimeUnit.SECONDS)
+        }.andThenCompose {
+            publishExplorationMap(localizeAndMap, updatedMapCallback)
+        }
     }
+
     private fun startMapExtensionStep(initialExplorationMap: ExplorationMap, qiContext: QiContext) {
-        Log.i(TAG.toString(),"StartMapEXTENSION Class")
+        Log.i(TAG.toString(), "StartMapEXTENSION Class")
         extendMapButton.isEnabled = false
         holdAbilities(qiContext)
         extendMap(initialExplorationMap, qiContext) { updatedMap ->
@@ -469,14 +528,14 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
     }
 
 
-
-    private fun robotOnMap (initialExplorationMap: ExplorationMap,qiContext: QiContext){
-        Log.i(TAG.toString(),"$initialExplorationMap Class")
+    private fun robotOnMap(initialExplorationMap: ExplorationMap, qiContext: QiContext) {
+        Log.i(TAG.toString(), "$initialExplorationMap Class")
 
     }
+
     private fun holdAbilities(qiContext: QiContext) {
         // Build and store the holder for the abilities.
-            holder = HolderBuilder.with(qiContext)
+        holder = HolderBuilder.with(qiContext)
             .withAutonomousAbilities(
                 AutonomousAbilitiesType.BACKGROUND_MOVEMENT,
                 AutonomousAbilitiesType.BASIC_AWARENESS,
@@ -493,8 +552,12 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
         val releaseFuture: Future<Void> = holder.async().release()
     }
 
-    private fun extendMap(explorationMap: ExplorationMap, qiContext: QiContext, updatedMapCallback: (ExplorationMap) -> Unit): Future<Void> {
-        Log.i(TAG.toString(),"ExtandMap Class")
+    private fun extendMap(
+        explorationMap: ExplorationMap,
+        qiContext: QiContext,
+        updatedMapCallback: (ExplorationMap) -> Unit
+    ): Future<Void> {
+        Log.i(TAG.toString(), "ExtandMap Class")
         val promise = Promise<Void>().apply {
             // If something tries to cancel the associated Future, do cancel it.
             setOnCancel {
@@ -509,28 +572,29 @@ class MainActivity : RobotActivity(), RobotLifecycleCallbacks {
             .withMap(explorationMap)
             .buildAsync()
             .andThenCompose { localizeAndMap ->
-                Log.i(TAG.toString(),"localizeandmap Class")
+                Log.i(TAG.toString(), "localizeandmap Class")
 
                 // Add an OnStatusChangedListener to know when the robot is localized.
                 localizeAndMap.addOnStatusChangedListener { status ->
                     if (status == LocalizationStatus.LOCALIZED) {
                         // Start the map notification process.
-                        publishExplorationMapFuture = publishExplorationMap(localizeAndMap, updatedMapCallback)
+                        publishExplorationMapFuture =
+                            publishExplorationMap(localizeAndMap, updatedMapCallback)
                     }
                 }
 
                 // Run the LocalizeAndMap.
                 localizeAndMap.async().run()
                     .thenConsume {
-                    // Remove the OnStatusChangedListener.
-                    localizeAndMap.removeAllOnStatusChangedListeners()
-                    // Stop the map notification process.
-                    publishExplorationMapFuture?.cancel(true)
-                    // In case of error, forward it to the Promise.
-                    if (it.hasError() && !promise.future.isDone) {
-                        promise.setError(it.errorMessage)
+                        // Remove the OnStatusChangedListener.
+                        localizeAndMap.removeAllOnStatusChangedListeners()
+                        // Stop the map notification process.
+                        publishExplorationMapFuture?.cancel(true)
+                        // In case of error, forward it to the Promise.
+                        if (it.hasError() && !promise.future.isDone) {
+                            promise.setError(it.errorMessage)
+                        }
                     }
-                }
             }
 
         // Return the Future associated to the Promise.
